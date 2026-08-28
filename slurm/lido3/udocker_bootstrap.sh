@@ -10,11 +10,22 @@
 # cannot work and a setuid install needs an admin. udocker needs no privilege at
 # all — it unpacks OCI layers into a plain directory tree and enters them with
 # PRoot (ptrace) or Fakechroot (LD_PRELOAD).
+#
+# WHY A VENV, NOT `pip install --user`:
+#   `pip install --user` with PYTHONUSERBASE pointed at /work puts the package in
+#   $PREFIX/lib/pythonX.Y/site-packages, which Python only searches when
+#   PYTHONUSERBASE is ALSO set at run time. Every later shell that had PATH but not
+#   PYTHONUSERBASE got `ModuleNotFoundError: No module named 'udocker'` from udocker's
+#   own launcher — observed on gw01, 2026-08-28. Worse, config/hpc-env.sh legitimately
+#   points PYTHONUSERBASE at the project cache, which would shadow the install.
+#   A venv's launcher shebang names its own interpreter, so PATH alone is sufficient
+#   and nothing can shadow it.
 set -euo pipefail
 
 WORK="${WORK:-/work/${USER}}"
 export UDOCKER_DIR="${UDOCKER_DIR:-${WORK}/.udocker}"
 PREFIX="${UDOCKER_PREFIX:-${WORK}/.local}"
+VENV="${PREFIX}/venvs/udocker"
 
 case "$(hostname -s)" in
   gw01|gw02) ;;
@@ -27,24 +38,29 @@ esac
 
 [ -d "$WORK" ] || { echo "udocker_bootstrap: no such directory: $WORK" >&2; exit 1; }
 
-mkdir -p "$UDOCKER_DIR" "$PREFIX"
+mkdir -p "$UDOCKER_DIR" "$PREFIX/bin" "$(dirname "$VENV")"
 
-# pip --user honours PYTHONUSERBASE. Without this it writes to ~/.local, which on a
-# stock LiDO3 account does not exist and, once created, sits on the read-only-on-
-# compute home. See the account-setup section of the README.
-export PYTHONUSERBASE="$PREFIX"
-export PATH="$PREFIX/bin:$PATH"
-
-if command -v udocker >/dev/null 2>&1; then
-  echo "udocker already on PATH: $(command -v udocker)  ($(udocker --version 2>/dev/null | head -1))"
-else
-  echo "-- installing udocker into $PREFIX"
-  python3 -m pip install --user --upgrade udocker
+if [ ! -x "$VENV/bin/udocker" ]; then
+  echo "-- creating venv at $VENV"
+  python3 -m venv "$VENV"
+  "$VENV/bin/python" -m pip install --quiet --upgrade pip
+  "$VENV/bin/python" -m pip install --quiet --upgrade udocker
 fi
+
+ln -sfn "$VENV/bin/udocker" "$PREFIX/bin/udocker"
+export PATH="$PREFIX/bin:$PATH"
 
 command -v udocker >/dev/null 2>&1 || {
   echo "udocker_bootstrap: udocker is still not on PATH after install." >&2
   echo "  Expected it at $PREFIX/bin/udocker" >&2
+  exit 1
+}
+
+# Prove it can import itself with NOTHING but PATH set — the exact failure this
+# venv layout exists to prevent. `env -i` strips PYTHONUSERBASE and everything else.
+env -i PATH="$PREFIX/bin:/usr/bin:/bin" HOME="$WORK" UDOCKER_DIR="$UDOCKER_DIR" \
+  udocker --version >/dev/null 2>&1 || {
+  echo "udocker_bootstrap: udocker cannot run with PATH alone; the install is not self-contained." >&2
   exit 1
 }
 
@@ -53,7 +69,7 @@ udocker install
 
 cat <<SHELL
 
-udocker is installed.
+udocker $(udocker --version 2>/dev/null | head -1) is installed and self-contained.
 
 Add to your shell profile (or source config/hpc-env.sh from a project, which
 exports the same two variables):
@@ -61,6 +77,6 @@ exports the same two variables):
     export UDOCKER_DIR="$UDOCKER_DIR"
     export PATH="$PREFIX/bin:\$PATH"
 
-Both MUST be set inside every job: udocker defaults UDOCKER_DIR to ~/.udocker,
+UDOCKER_DIR MUST be set inside every job: udocker defaults it to ~/.udocker,
 which is read-only on compute nodes and fails with a bare permission error.
 SHELL
