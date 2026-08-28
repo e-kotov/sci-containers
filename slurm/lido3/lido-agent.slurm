@@ -54,7 +54,10 @@ INFO
 # tmux runs on the host so an SSH-in session can reach its socket. The container is
 # the tmux window's command, not its parent.
 tmux new-session -d -s "$SESSION" -c "${WORK}" \
-  udocker run --rm \
+  # NOTE: no --rm. In udocker, `run --rm <name>` DELETES the named container created by
+  # `udocker create`, not just the run — the next job then finds nothing and tries to pull
+  # "sci-agent" from Docker Hub ("manifest not found"). Verified on cstd01-001, 2026-08-28.
+  udocker run \
     --env=HOME="${WORK}/agent-home" \
     --env=TMPDIR="$SCRATCH_DIR" \
     --env=TERM=xterm-256color \

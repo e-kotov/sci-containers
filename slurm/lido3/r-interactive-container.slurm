@@ -42,7 +42,10 @@ trap 'rm -rf "$SCRATCH_DIR"' EXIT
 EXECMODE="${UDOCKER_EXECMODE:-F3}"
 udocker setup --execmode="$EXECMODE" sci-r-geo
 
-exec udocker run --rm \
+# NOTE: no --rm. In udocker, `run --rm <name>` DELETES the named container created by
+# `udocker create`, not just the run — the next job then finds nothing and tries to pull
+# "sci-agent" from Docker Hub ("manifest not found"). Verified on cstd01-001, 2026-08-28.
+exec udocker run \
   --env=HOME="${WORK}" \
   --env=TMPDIR="$SCRATCH_DIR" \
   --env=R_LIBS_USER="${WORK}/R/%V" \
