@@ -1,0 +1,73 @@
+name: Build and Push sci-r-geo
+
+# Single-platform by necessity, not by choice: the rocker/geospatial base publishes
+# no linux/arm64 manifest, so an arm64 matrix leg cannot build. Both target clusters
+# (GWDG SCC, TU Dortmund LiDO3) are amd64.
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'dockerfiles/sci-r-geo.Dockerfile'
+      - '.github/workflows/sci-r-geo-publish.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE_NAME: sci-r-geo
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image name to lowercase
+        run: |
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME=${OWNER_LC}/${{ env.IMAGE_BASE_NAME }}" >> $GITHUB_ENV
+
+      - name: Extract metadata (labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: dockerfiles/sci-r-geo.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ env.IMAGE_BASE_NAME }}-amd64
+          cache-to: type=gha,mode=max,scope=${{ env.IMAGE_BASE_NAME }}-amd64
+
+      # The cluster lanes pull BY DIGEST, never by tag, so the digest has to be
+      # readable without a registry round-trip from inside a job.
+      - name: Report the immutable digest
+        run: |
+          echo "### sci-r-geo published" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

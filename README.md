@@ -1,0 +1,104 @@
+# sci-containers
+
+Container image definitions and cluster run scripts for scientific computing on
+HPC. Images are topical, never project-named; nothing here identifies a research
+project.
+
+Two clusters, one image per purpose, pinned by digest so both run demonstrably
+the same thing:
+
+| Image | `ghcr.io/e-kotov/…` | Platforms | What it is for |
+|---|---|---|---|
+| `sci-r-geo` | `sci-r-geo` | `linux/amd64` only | R + GDAL/GEOS/PROJ + sf/terra/stars + tidyverse + renv |
+| `sci-agent` | `sci-agent` | `linux/amd64`, `linux/arm64` | Node 22 + Claude Code + git/tmux/ripgrep |
+
+`sci-r-geo` is amd64-only because its `rocker/geospatial` base publishes no arm64
+manifest (checked against the registry on 2026-08-28 for 4.5.0–4.5.2). Both target
+clusters are amd64, so nothing is lost.
+
+## Why `sci-agent` exists at all
+
+TU Dortmund LiDO3 runs RHEL 7.9 with **glibc 2.17**. Node 18+ needs glibc 2.28.
+No Node binary runs natively there, so the agent has to be containerised.
+
+## Two runtimes, because two clusters disagree about user namespaces
+
+| | GWDG SCC | TU Dortmund LiDO3 |
+|---|---|---|
+| `max_user_namespaces` | non-zero | **0**, cluster-wide, kernel 3.10 |
+| `newuidmap` setuid | — | **not setuid** |
+| Runtime | Apptainer 1.4.3 (`module load`) | **udocker** (userspace, no privilege) |
+| Engines | — | P1 (PRoot/ptrace), F1–F4 (Fakechroot/LD_PRELOAD). R1–R3 and S1 need namespaces: dead. |
+
+Nothing a user can do changes the LiDO3 side. Both lanes pull the same digest.
+
+## LiDO3 quick start
+
+```bash
+# once per account, ON A GATEWAY (gw01/gw02)
+slurm/lido3/udocker_bootstrap.sh
+
+# any time; compute nodes have outbound internet, so this also works inside a job
+slurm/lido3/udocker_pull.sh ghcr.io/e-kotov/sci-r-geo sha256:<digest>
+
+# batch
+mkdir -p /work/$USER/logs        # slurmd opens --output BEFORE the script runs
+sbatch --export=ALL,SCI_R_GEO_DIGEST=sha256:<digest> \
+       slurm/lido3/r-interactive-container.slurm R --version
+```
+
+### Two variables that are not optional
+
+```bash
+export UDOCKER_DIR="/work/$USER/.udocker"      # default ~/.udocker is READ-ONLY on compute
+export PATH="/work/$USER/.local/bin:$PATH"     # udocker itself lives in /work
+```
+
+`$HOME` on LiDO3 is 32 GiB, tape-backed, and **read-only on compute nodes**. Every
+write path — the udocker store, the image layers, caches, `$HOME` inside the
+container — must resolve into `/work`. `/work` has **no backup**; copy anything you
+care about off-cluster.
+
+### Execmode
+
+`F3` (Fakechroot) is the default in these scripts: LD_PRELOAD, no ptrace, far
+cheaper for I/O- and syscall-heavy work. `P1` (PRoot) works everywhere and is the
+fallback — a toy 20k-iteration shell loop measured 0.17 s native vs 0.29 s under P1,
+and file-churning pipelines do worse. F modes need a glibc image; both images here
+are Debian-based, so they qualify. **Measure your own workload before assuming.**
+
+```bash
+UDOCKER_EXECMODE=P1 sbatch --export=ALL,... slurm/lido3/r-interactive-container.slurm
+```
+
+## GWDG quick start
+
+```bash
+slurm/gwdg/apptainer_pull.sh ~/containers/sci-r-geo.sif \
+    ghcr.io/e-kotov/sci-r-geo sha256:<same digest>
+sbatch --export=ALL,SCI_R_GEO_SIF=$HOME/containers/sci-r-geo.sif \
+       slurm/gwdg/r-interactive-container.slurm R --version
+```
+
+## Agent workstation on LiDO3 (`slurm/lido3/lido-agent.slurm`)
+
+A 36 h `long` allocation holding a host-side tmux session whose window runs
+`sci-agent` under udocker. Attach with plain SSH from a gateway into your own
+allocated node — LiDO3 permits that, so there is no sshd inside the container.
+
+**`$HOME` is read-only inside this job.** Compute only: no `git commit`, no memory
+writes. Those happen on a gateway or off-cluster.
+
+## Publishing
+
+GitHub Actions builds on push to `main` when the matching Dockerfile changes, and on
+`workflow_dispatch`. Push uses `secrets.GITHUB_TOKEN`, so no PAT and no
+`write:packages` scope on a personal token are needed. Each run prints the immutable
+digest in its job summary — that digest is what the cluster scripts take.
+
+## Relation to `e-kotov/datasci_containers`
+
+That repo is the working precedent for the publish workflow (ghcr.io, multi-arch by
+digest with a merge job) and stays exactly as it is. This repo is separate because it
+carries cluster run scripts as well as images, and is built to be public from the
+first commit.
