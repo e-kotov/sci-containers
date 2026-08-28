@@ -43,7 +43,14 @@ mkdir -p "$SCRATCH_DIR" "${WORK}/agent-home" "$(dirname "$SOCK")"
 rm -f "$SOCK"
 trap 'rm -rf "$SCRATCH_DIR"; rm -f "$SOCK"' EXIT TERM
 
-"$(dirname "$0")/udocker_pull.sh" "$REPO" "$DIGEST" sci-agent
+# Resolve the helper by REPO PATH, never by $(dirname "$0"): Slurm copies the batch
+# script into the node's spool directory before running it, so $0 is
+# /var/spool/slurm/d/jobNNN/slurm_script and dirname $0 contains nothing else.
+# (Observed as "No such file or directory" on job 40190615, 2026-08-28.)
+SCI_CONTAINERS_DIR="${SCI_CONTAINERS_DIR:-${WORK}/sci-containers}"
+PULL="${SCI_CONTAINERS_DIR}/slurm/lido3/udocker_pull.sh"
+[ -x "$PULL" ] || { echo "missing $PULL — clone e-kotov/sci-containers into $SCI_CONTAINERS_DIR" >&2; exit 1; }
+"$PULL" "$REPO" "$DIGEST" sci-agent
 udocker setup --execmode="${UDOCKER_EXECMODE:-F3}" sci-agent
 
 # Report where to attach, into the job log, before blocking.

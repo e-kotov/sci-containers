@@ -34,7 +34,14 @@ SCRATCH_DIR="/scratch/${USER}/${SLURM_JOB_ID}"
 mkdir -p "$SCRATCH_DIR"
 trap 'rm -rf "$SCRATCH_DIR"' EXIT
 
-"$(dirname "$0")/udocker_pull.sh" "$REPO" "$DIGEST" sci-r-geo
+# Resolve the helper by REPO PATH, never by $(dirname "$0"): Slurm copies the batch
+# script into the node's spool directory before running it, so $0 is
+# /var/spool/slurm/d/jobNNN/slurm_script and dirname $0 contains nothing else.
+# (Observed as "No such file or directory" on job 40190615, 2026-08-28.)
+SCI_CONTAINERS_DIR="${SCI_CONTAINERS_DIR:-${WORK}/sci-containers}"
+PULL="${SCI_CONTAINERS_DIR}/slurm/lido3/udocker_pull.sh"
+[ -x "$PULL" ] || { echo "missing $PULL — clone e-kotov/sci-containers into $SCI_CONTAINERS_DIR" >&2; exit 1; }
+"$PULL" "$REPO" "$DIGEST" sci-r-geo
 
 # Execmode: F3 (Fakechroot, LD_PRELOAD) is far cheaper than P1 (PRoot, ptrace) for
 # I/O- and syscall-heavy work. F modes need a glibc image — this one is Debian, so
