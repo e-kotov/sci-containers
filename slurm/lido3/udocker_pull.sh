@@ -61,7 +61,17 @@ mkdir -p "$UDOCKER_DIR"
 
 # Already built and verified? `udocker create` is the expensive step (it unpacks every
 # layer), so do not repeat it.
-if udocker ps 2>/dev/null | grep -q "[[:space:]]${LOCAL_NAME}\$"; then
+# udocker prints container NAMES as a Python list repr, not a bare word:
+#     CONTAINER ID                          P M NAMES          IMAGE
+#     0e463400-22a2-3846-8fd6-3fabdd986dae  . W ['sci-agent']  ghcr.io/e-kotov/sci-agent:latest
+# so a `grep "[[:space:]]name$"` never matches, the script concludes the container is
+# absent, and `udocker create` then fails with "container name already exists" — which
+# under `set -e` kills the job. Match the quoted form. (Job 40190741, 2026-08-28.)
+container_exists() {
+  udocker ps 2>/dev/null | grep -q "'$1'"
+}
+
+if container_exists "$LOCAL_NAME"; then
   echo "container already present: ${LOCAL_NAME}"
   exit 0
 fi
