@@ -53,38 +53,41 @@ PULL="${SCI_CONTAINERS_DIR}/slurm/lido3/udocker_pull.sh"
 "$PULL" "$REPO" "$DIGEST" sci-agent
 udocker setup --execmode="${UDOCKER_EXECMODE:-F3}" sci-agent
 
-# Report where to attach, into the job log, before blocking.
+# --- Why this job holds the allocation but hosts NO terminal multiplexer -------------
+# The obvious design runs tmux here so the session survives a dropped laptop connection.
+# On this cluster it cannot, and both halves were measured on cstd01-001 (2026-08-28):
+#
+#   * Compute nodes have NO tmux at all — `bash: tmux: command not found`. Only the
+#     gateways carry it.
+#   * The tmux inside the sci-agent image cannot open a socket under udocker:
+#       F3 (Fakechroot): "error creating <path> (No such file or directory)" for a socket
+#                        on /work, on /scratch, and via TMUX_TMPDIR alike — fakechroot
+#                        redirects AF_UNIX paths (FAKECHROOT_AF_UNIX_PATH) and the
+#                        redirected path does not resolve.
+#       P1 (PRoot):      "access not allowed" — PRoot maps the caller to uid 0, and tmux
+#                        refuses a socket directory it does not own.
+#
+# So the multiplexer lives on the GATEWAY, where tmux exists and is native, and its
+# window SSHes into this node and runs the container. The gateway then carries only an
+# ssh client and a tmux server — a few MB, nothing ITMC's CPU-hog policy is aimed at —
+# while every byte of real work happens inside this allocation.
+#
+# This job's only duties: pre-pull the image so attaching is instant, and hold the
+# allocation open.
 cat <<INFO
 Node:    $(hostname -s)
-Session: ${SESSION}
-Socket:  ${SOCK}
 Job:     ${SLURM_JOB_ID}
+Image:   sci-agent (execmode ${UDOCKER_EXECMODE:-F3})
 Attach:  lido-agent-remote attach ${SLURM_JOB_ID}
+NOTE:    $HOME is READ-ONLY here. No git commit, no docs/memory/ writes.
 INFO
 
-# --- Why tmux runs INSIDE the container ---------------------------------------------
-# The obvious design puts tmux on the host and the container in a tmux window. That does
-# not work here: LiDO3 compute nodes have NO tmux (`bash: tmux: command not found` on
-# cstd01-001, 2026-08-28) — it exists only on the gateways. The sci-agent image does ship
-# tmux, so the session host is the container's tmux, with its socket on /work so a second
-# udocker invocation (the attach) can reach the same server.
-#
-# And this udocker wrapper stays in the FOREGROUND for the whole job rather than
-# detaching. Under P1 the engine is PRoot, which traces its children: if the launching
-# wrapper exited, the tmux server it started would be torn down with the tracer. Holding
-# the wrapper open makes the session survive in every execmode, not just the F ones.
-exec udocker run --nobanner \
-    --env=HOME="${WORK}/agent-home" \
-    --env=TMPDIR="$SCRATCH_DIR" \
-    --env=TERM=xterm-256color \
-    --env=SLURM_JOB_ID="${SLURM_JOB_ID}" \
-    --env=LIDO_AGENT_MODE=compute-readonly-home \
-    --volume="${WORK}:${WORK}" \
-    --volume="${SCRATCH_DIR}:${SCRATCH_DIR}" \
-    --workdir="${WORK}" \
-    sci-agent bash -lc '
-      set -e
-      tmux -S "'"$SOCK"'" new-session -d -s "'"$SESSION"'" -c "'"$WORK"'"
-      # Hold the allocation while the session lives; exit early once it is closed.
-      while tmux -S "'"$SOCK"'" has-session -t "'"$SESSION"'" 2>/dev/null; do sleep 30; done
-    '
+udocker setup --execmode="${UDOCKER_EXECMODE:-F3}" sci-agent
+
+# Prove the image actually runs before anyone tries to attach to it, so a broken pull
+# surfaces here, in the job log, instead of as a confusing failure at attach time.
+udocker run --nobanner --volume="${WORK}:${WORK}" --env=HOME="${WORK}/agent-home" \
+    sci-agent bash -lc 'echo "ready: node $(node -v), $(claude --version 2>&1 | head -1)"'
+
+# Hold the allocation. `--signal=B:TERM@60` plus the EXIT trap cleans up on scancel.
+while true; do sleep 60; done
