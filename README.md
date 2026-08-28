@@ -39,7 +39,7 @@ Nothing a user can do changes the LiDO3 side. Both lanes pull the same digest.
 slurm/lido3/udocker_bootstrap.sh
 
 # any time; compute nodes have outbound internet, so this also works inside a job
-slurm/lido3/udocker_pull.sh ghcr.io/e-kotov/sci-r-geo sha256:<digest>
+slurm/lido3/udocker_pull.sh ghcr.io/e-kotov/sci-r-geo sha256:<amd64-manifest-digest>
 
 # batch
 mkdir -p /work/$USER/logs        # slurmd opens --output BEFORE the script runs
@@ -58,6 +58,32 @@ export PATH="/work/$USER/.local/bin:$PATH"     # udocker itself lives in /work
 write path — the udocker store, the image layers, caches, `$HOME` inside the
 container — must resolve into `/work`. `/work` has **no backup**; copy anything you
 care about off-cluster.
+
+### How the digest pin survives udocker
+
+**udocker 1.3.17 cannot pull a digest reference.** Its grammar is
+`pull [options] <repo/image:tag>`; `repo@sha256:…` fails with
+`Error: must specify image:tag or repository/image:tag` (verified on gw01, 2026-08-28).
+Apptainer accepts `docker://repo@sha256:…`, so the two lanes cannot pin identically.
+
+`udocker_pull.sh` therefore enforces the pin *after* the pull instead of during it:
+
+1. ask the registry which **config digest** the pinned manifest declares;
+2. `udocker pull --platform=linux/amd64 repo:tag`;
+3. read the config digest out of the manifest udocker stored;
+4. equal → this is the pinned image; different → delete it and fail.
+
+Hashing udocker's stored manifest file would not work — udocker re-serializes the JSON,
+so its bytes are not the registry's canonical bytes. The config digest inside it is
+content-addressed by the registry and commits to every rootfs layer, so comparing it is
+a real check rather than a proxy for one.
+
+If `latest` has moved past your pinned digest the script refuses and tells you to pass
+the immutable tag instead. Every CI build publishes `sha-<commit>` alongside `latest`:
+
+```bash
+slurm/lido3/udocker_pull.sh ghcr.io/e-kotov/sci-r-geo sha256:<digest> sci-r-geo sha-<commit>
+```
 
 ### Execmode
 

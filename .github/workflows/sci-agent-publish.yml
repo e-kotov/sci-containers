@@ -120,7 +120,7 @@ jobs:
         run: |
           docker buildx imagetools create \
             -t ${{ env.REGISTRY }}/${IMAGE_NAME}:latest \
-            -t ${{ env.REGISTRY }}/${IMAGE_NAME}:${{ github.sha }} \
+            -t ${{ env.REGISTRY }}/${IMAGE_NAME}:sha-${{ github.sha }} \
             $(printf "${{ env.REGISTRY }}/${IMAGE_NAME}@sha256:%s " *)
 
       # udocker resolves a multi-arch index itself, but the LiDO3 lane pins the
