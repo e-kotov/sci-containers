@@ -4,12 +4,9 @@
 # and the tidyverse compiled against them. Rebuilding that stack from r-ver would
 # cost an hour of CI per push and buy nothing.
 #
-# PLATFORM: linux/amd64 ONLY, and this is not a preference.
-#   rocker/geospatial publishes no linux/arm64 manifest (verified 2026-08-28 against
-#   registry-1.docker.io for 4.5.0/4.5.1/4.5.2 — each index lists amd64 and the
-#   attestation blob, nothing else). Both target clusters are amd64, so the matrix
-#   would only ever have produced a failing arm64 leg.
-FROM rocker/geospatial:4.5.2
+# PLATFORM: linux/amd64 + linux/arm64. rocker/geospatial publishes both from the 4.6
+# line onward (4.5.x was amd64-only; verified against the registry 2026-08-29).
+FROM rocker/geospatial:4.6.1
 
 # Cluster-side needs the rocker image does not ship:
 #   - tmux/less/procps: interactive attach and self-inspection inside udocker

@@ -1,8 +1,8 @@
 name: Build and Push sci-r-geo
 
-# Single-platform by necessity, not by choice: the rocker/geospatial base publishes
-# no linux/arm64 manifest, so an arm64 matrix leg cannot build. Both target clusters
-# (GWDG SCC, TU Dortmund LiDO3) are amd64.
+# Multi-arch: rocker/geospatial publishes amd64 and arm64 from the 4.6 line onward.
+# (4.5.x was amd64-only, which is why an earlier version of this file was single-platform.)
+# Build-by-digest + a merge job is the pattern proven in e-kotov/datasci_containers.
 
 on:
   push:
@@ -22,9 +22,17 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        if: matrix.platform == 'linux/arm64'
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -36,6 +44,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract platform suffix
+        id: suffix
+        run: |
+          PLATFORM="${{ matrix.platform }}"
+          echo "suffix=${PLATFORM#linux/}" >> $GITHUB_OUTPUT
+
       - name: Set image name to lowercase
         run: |
           OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
@@ -46,28 +60,78 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest
-            type=sha,format=long,prefix=sha-
 
-      - name: Build and push
+      - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: dockerfiles/sci-r-geo.Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ env.IMAGE_BASE_NAME }}-amd64
-          cache-to: type=gha,mode=max,scope=${{ env.IMAGE_BASE_NAME }}-amd64
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ env.IMAGE_BASE_NAME }}-${{ steps.suffix.outputs.suffix }}
+          cache-to: type=gha,mode=max,scope=${{ env.IMAGE_BASE_NAME }}-${{ steps.suffix.outputs.suffix }}
 
-      # The cluster lanes pull BY DIGEST, never by tag, so the digest has to be
-      # readable without a registry round-trip from inside a job.
-      - name: Report the immutable digest
+      - name: Export digest
         run: |
-          echo "### sci-r-geo published" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.IMAGE_BASE_NAME }}-${{ steps.suffix.outputs.suffix }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      packages: write
+    steps:
+      - name: Set image name to lowercase
+        run: |
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME=${OWNER_LC}/${{ env.IMAGE_BASE_NAME }}" >> $GITHUB_ENV
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ env.IMAGE_BASE_NAME }}-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifest
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${IMAGE_NAME}:latest \
+            -t ${{ env.REGISTRY }}/${IMAGE_NAME}:sha-${{ github.sha }} \
+            $(printf "${{ env.REGISTRY }}/${IMAGE_NAME}@sha256:%s " *)
+
+      # udocker resolves a multi-arch index itself, but the LiDO3 lane pins the
+      # linux/amd64 CHILD manifest, so print both.
+      - name: Report digests
+        run: |
+          {
+            echo "### sci-r-geo published"
+            echo '```'
+            docker buildx imagetools inspect --raw "${{ env.REGISTRY }}/${IMAGE_NAME}:latest" \
+              | sha256sum | awk '{print "index sha256:" $1}'
+            docker buildx imagetools inspect "${{ env.REGISTRY }}/${IMAGE_NAME}:latest"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

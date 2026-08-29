@@ -9,12 +9,11 @@ the same thing:
 
 | Image | `ghcr.io/e-kotov/…` | Platforms | What it is for |
 |---|---|---|---|
-| `sci-r-geo` | `sci-r-geo` | `linux/amd64` only | R + GDAL/GEOS/PROJ + sf/terra/stars + tidyverse + renv |
+| `sci-r-geo` | `sci-r-geo` | `linux/amd64`, `linux/arm64` | R 4.6.1 + GDAL/GEOS/PROJ + sf/terra/stars + tidyverse + renv |
 | `sci-agent` | `sci-agent` | `linux/amd64`, `linux/arm64` | Node 22 + Claude Code + git/tmux/ripgrep |
 
-`sci-r-geo` is amd64-only because its `rocker/geospatial` base publishes no arm64
-manifest (checked against the registry on 2026-08-28 for 4.5.0–4.5.2). Both target
-clusters are amd64, so nothing is lost.
+Both images are multi-arch. `rocker/geospatial` gained `linux/arm64` in the 4.6 line;
+4.5.x was amd64-only.
 
 ## Why `sci-agent` exists at all
 
