@@ -43,11 +43,8 @@ PULL="${SCI_CONTAINERS_DIR}/slurm/lido3/udocker_pull.sh"
 [ -x "$PULL" ] || { echo "missing $PULL — clone e-kotov/sci-containers into $SCI_CONTAINERS_DIR" >&2; exit 1; }
 "$PULL" "$REPO" "$DIGEST" sci-r-geo
 
-# Execmode: F3 (Fakechroot, LD_PRELOAD) is far cheaper than P1 (PRoot, ptrace) for
-# I/O- and syscall-heavy work. F modes need a glibc image — this one is Debian, so
-# they should apply; P1 remains correct everywhere and is the documented fallback.
-EXECMODE="${UDOCKER_EXECMODE:-F3}"
-udocker setup --execmode="$EXECMODE" sci-r-geo
+# Execmode was set once at create time by udocker_pull.sh; see the note there.
+# Do NOT call `udocker setup` per run: it re-patches the whole rootfs.
 
 # NOTE: no --rm. In udocker, `run --rm <name>` DELETES the named container created by
 # `udocker create`, not just the run — the next job then finds nothing and tries to pull

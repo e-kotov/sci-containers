@@ -141,4 +141,21 @@ fi
 echo "   verified: pulled image matches the pinned digest"
 
 udocker create --name="${LOCAL_NAME}" "${REPO}:${TAG}"
-echo "-- ready: udocker run --execmode=F3 ${LOCAL_NAME} ..."
+
+# Execmode is set ONCE here, at create time, and never per run.
+#
+# `udocker setup --execmode=` is not a flag — F modes PATCH the ELF interpreter of every
+# binary in the unpacked rootfs, and switching modes un-patches them again. On a
+# multi-GB image on BeeGFS that is minutes of small-file I/O, and doing it inside each
+# job also races when two jobs share one container. A benchmark that toggled F3/P1 per
+# invocation made both modes look broken; run once, they both work. (2026-08-29.)
+EXECMODE="${UDOCKER_EXECMODE:-F3}"
+case "$EXECMODE" in
+  P1|P2|F1|F2|F3|F4) ;;
+  R1|R2|R3|S1) echo "udocker_pull: execmode $EXECMODE needs user namespaces, which LiDO3 disables" >&2; exit 1 ;;
+  *) echo "udocker_pull: unsupported execmode: $EXECMODE" >&2; exit 1 ;;
+esac
+echo "-- setting execmode $EXECMODE (one-time rootfs patch; slow on a large image)"
+udocker setup --execmode="$EXECMODE" "${LOCAL_NAME}"
+
+echo "-- ready: udocker run ${LOCAL_NAME} ..."

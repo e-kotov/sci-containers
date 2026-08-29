@@ -51,7 +51,8 @@ SCI_CONTAINERS_DIR="${SCI_CONTAINERS_DIR:-${WORK}/sci-containers}"
 PULL="${SCI_CONTAINERS_DIR}/slurm/lido3/udocker_pull.sh"
 [ -x "$PULL" ] || { echo "missing $PULL — clone e-kotov/sci-containers into $SCI_CONTAINERS_DIR" >&2; exit 1; }
 "$PULL" "$REPO" "$DIGEST" sci-agent
-udocker setup --execmode="${UDOCKER_EXECMODE:-F3}" sci-agent
+# Execmode was set once at create time by udocker_pull.sh; see the note there.
+# Do NOT call `udocker setup` per run: it re-patches the whole rootfs.
 
 # --- Why this job holds the allocation but hosts NO terminal multiplexer -------------
 # The obvious design runs tmux here so the session survives a dropped laptop connection.

@@ -86,14 +86,19 @@ slurm/lido3/udocker_pull.sh ghcr.io/e-kotov/sci-r-geo sha256:<digest> sci-r-geo 
 
 ### Execmode
 
-`F3` (Fakechroot) is the default in these scripts: LD_PRELOAD, no ptrace, far
-cheaper for I/O- and syscall-heavy work. `P1` (PRoot) works everywhere and is the
-fallback — a toy 20k-iteration shell loop measured 0.17 s native vs 0.29 s under P1,
-and file-churning pipelines do worse. F modes need a glibc image; both images here
-are Debian-based, so they qualify. **Measure your own workload before assuming.**
+`F3` (Fakechroot, LD_PRELOAD) is the default: no ptrace, far cheaper than `P1` (PRoot) for
+I/O- and syscall-heavy work. `P1` works everywhere and is the fallback. F modes need a
+glibc image; both images here qualify (Debian 12 and Ubuntu 24.04).
+
+**Set the execmode once, at pull time — never per run.** `udocker setup --execmode=` is
+not a runtime flag: the F modes patch the ELF interpreter of *every binary in the
+unpacked rootfs*, and switching modes un-patches them again. On a multi-GB image on
+BeeGFS that is minutes of small-file I/O, and doing it inside each job also races when
+two jobs share a container. `udocker_pull.sh` does it once at create time; the launchers
+deliberately do not.
 
 ```bash
-UDOCKER_EXECMODE=P1 sbatch --export=ALL,... slurm/lido3/r-interactive-container.slurm
+UDOCKER_EXECMODE=P1 slurm/lido3/udocker_pull.sh ghcr.io/e-kotov/sci-r-geo sha256:<digest>
 ```
 
 ## GWDG quick start
