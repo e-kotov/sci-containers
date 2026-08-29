@@ -99,6 +99,17 @@ for I/O- and syscall-heavy work. Both images are glibc, so F modes apply.
 So `sci-r-geo`'s fallback is **`P2`**, i.e. PRoot without seccomp acceleration. `P1`'s
 seccomp path does not survive this image on the 3.10 kernel.
 
+Cost, measured on a compute node (400 small RDS round-trips + a 700×700 matrix multiply,
+against the site's native `R/4.4.2` module):
+
+| runtime | `io_sec` | `cpu_sec` | one-time `setup` |
+|---|---|---|---|
+| F3 | 0.31–0.32 | 0.03–0.04 | 219.7 s |
+| P2 | 0.52 | 0.15 | 150.4 s |
+| native module | 0.30 | 0.05 | — |
+
+F3 is within ~7 % of native on I/O. PRoot is ~1.7× worse — use F3 unless it fails.
+
 **Set the execmode once, at pull time — never per run.** `udocker setup --execmode=` is
 not a runtime flag: the F modes patch the ELF interpreter of *every binary in the
 unpacked rootfs*, and switching modes un-patches them again. On a multi-GB image on
