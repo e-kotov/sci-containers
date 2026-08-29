@@ -86,9 +86,18 @@ slurm/lido3/udocker_pull.sh ghcr.io/e-kotov/sci-r-geo sha256:<digest> sci-r-geo 
 
 ### Execmode
 
-`F3` (Fakechroot, LD_PRELOAD) is the default: no ptrace, far cheaper than `P1` (PRoot) for
-I/O- and syscall-heavy work. `P1` works everywhere and is the fallback. F modes need a
-glibc image; both images here qualify (Debian 12 and Ubuntu 24.04).
+`F3` (Fakechroot, LD_PRELOAD) is the default: no ptrace, far cheaper than the PRoot modes
+for I/O- and syscall-heavy work. Both images are glibc, so F modes apply.
+
+**The fallback is image-specific — do not assume `P1`.** Measured 2026-08-29:
+
+| image | base | F3 | P1 | P2 |
+|---|---|---|---|---|
+| `sci-agent` | Debian 12 | works | works | — |
+| `sci-r-geo` | Ubuntu 24.04 | works | **fails** (not even `/bin/echo` runs) | works |
+
+So `sci-r-geo`'s fallback is **`P2`**, i.e. PRoot without seccomp acceleration. `P1`'s
+seccomp path does not survive this image on the 3.10 kernel.
 
 **Set the execmode once, at pull time — never per run.** `udocker setup --execmode=` is
 not a runtime flag: the F modes patch the ELF interpreter of *every binary in the

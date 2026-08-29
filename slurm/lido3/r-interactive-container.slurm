@@ -45,6 +45,8 @@ PULL="${SCI_CONTAINERS_DIR}/slurm/lido3/udocker_pull.sh"
 
 # Execmode was set once at create time by udocker_pull.sh; see the note there.
 # Do NOT call `udocker setup` per run: it re-patches the whole rootfs.
+# For THIS image the fallback is P2, not P1: P1 fails outright on the Ubuntu 24.04
+# rootfs (measured 2026-08-29 — /bin/echo produces nothing), while P2 works.
 
 # NOTE: no --rm. In udocker, `run --rm <name>` DELETES the named container created by
 # `udocker create`, not just the run — the next job then finds nothing and tries to pull
