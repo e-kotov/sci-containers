@@ -118,7 +118,12 @@ if [[ -n "$GPU_TYPE" ]]; then
             echo "GPU requested, but host CUDA library /usr/lib64/${library} is missing" >&2
             exit 1
         }
-        CONTAINER_ARGS+=("--volume=/usr/lib64/${library}:/usr/lib/x86_64-linux-gnu/${library}")
+        host_library="$(readlink -f "/usr/lib64/${library}")"
+        [[ -f "$host_library" ]] || {
+            echo "GPU requested, but host CUDA library /usr/lib64/${library} has no regular target" >&2
+            exit 1
+        }
+        CONTAINER_ARGS+=("--volume=${host_library}:/usr/lib/x86_64-linux-gnu/${library}")
     done
 fi
 if [[ -n "$GPU_TYPE" ]]; then
