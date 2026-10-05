@@ -102,22 +102,20 @@ declare -a CONTAINER_ARGS=(
 [[ -z "${NVIDIA_VISIBLE_DEVICES:-}" ]] || CONTAINER_ARGS+=(--env="NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES}")
 if [[ -n "$GPU_TYPE" ]]; then
     CONTAINER_ARGS+=(--env="LIDO_AGENT_GPU=${GPU_TYPE}")
-    driver_lib_count=0
-    for driver_lib in \
-        /usr/lib64/libcuda.so* /lib64/libcuda.so* \
-        /usr/lib64/libnvidia-ptxjitcompiler.so* /lib64/libnvidia-ptxjitcompiler.so* \
-        /usr/lib64/libnvidia-nvvm.so* /lib64/libnvidia-nvvm.so* \
-        /usr/lib64/libnvidia-fatbinaryloader.so* /lib64/libnvidia-fatbinaryloader.so* \
-        /usr/lib64/libnvidia-ml.so* /lib64/libnvidia-ml.so*; do
-        [[ -f "$driver_lib" ]] || continue
-        CONTAINER_ARGS+=(--volume="${driver_lib}:/opt/lido-nvidia/${driver_lib##*/}:ro")
-        driver_lib_count=$((driver_lib_count + 1))
-    done
-    (( driver_lib_count > 0 )) || { echo 'GPU requested, but host CUDA driver libraries were not found' >&2; exit 1; }
-    CONTAINER_ARGS+=(--env='LD_LIBRARY_PATH=/opt/lido-nvidia')
+    [[ -d /usr/lib64 && -e /usr/lib64/libcuda.so.1 ]] || {
+        echo 'GPU requested, but host CUDA driver libraries were not found in /usr/lib64' >&2
+        exit 1
+    }
+    CONTAINER_ARGS+=(--volume=/usr/lib64:/opt/lido-nvidia)
+    CONTAINER_ARGS+=(--env=LIDO_CUDA_HOST_LIBS=/opt/lido-nvidia)
 fi
-udocker run "${CONTAINER_ARGS[@]}" sci-agent bash -lc \
-    'echo "ready: node $(node -v), $(claude --version 2>&1 | head -1)"'
+if [[ -n "$GPU_TYPE" ]]; then
+    udocker run "${CONTAINER_ARGS[@]}" sci-agent bash -lc \
+        'export LD_LIBRARY_PATH="${LIDO_CUDA_HOST_LIBS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; python3 -c '\''import ctypes; d=ctypes.CDLL("libcuda.so.1"); assert d.cuInit(0)==0; print("ready: CUDA driver initialized")'\''; echo "ready: node $(node -v), $(claude --version 2>&1 | head -1)"'
+else
+    udocker run "${CONTAINER_ARGS[@]}" sci-agent bash -lc \
+        'echo "ready: node $(node -v), $(claude --version 2>&1 | head -1)"'
+fi
 
 tmp_ready="${READY_FILE}.tmp"
 printf 'JOBID=%s\nNODE=%s\nGPU=%s\nTUDO_ROUTE=%s\nPROJECT=%s\nCUDA_VISIBLE_DEVICES=%s\nNVIDIA_VISIBLE_DEVICES=%s\n' \
