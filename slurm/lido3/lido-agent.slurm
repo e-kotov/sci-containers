@@ -110,30 +110,40 @@ if [[ -n "$GPU_TYPE" ]]; then
     CONTAINER_ARGS+=(--env=LIDO_CUDA_HOST_LIBS=/opt/lido-nvidia)
     # CUDA's PTX loader dlopens the JIT compiler by soname. Under udocker that
     # lookup searches the container's standard library directories, even when
-    # LD_LIBRARY_PATH points at this host mount. Add container-root symlinks
-    # into the host-library mount so this lookup succeeds without overlaying
-    # any of the container's own libraries.
+    # LD_LIBRARY_PATH points at this host mount. Build a merged copy of the
+    # image's multiarch library directory, then add the host JIT libraries.
+    # Mounting the host's whole /usr/lib64 there would replace container libs.
     container_root="$(udocker inspect -p sci-agent)"
     container_lib_dir="${container_root}/usr/lib/x86_64-linux-gnu"
     [[ -d "$container_lib_dir" ]] || {
         echo "GPU requested, but sci-agent lacks /usr/lib/x86_64-linux-gnu" >&2
         exit 1
     }
+    container_id="${container_root%/ROOT}"
+    container_id="${container_id##*/}"
+    cuda_lib_overlay="${WORK}/.state/lido-agent/udocker-libs-${container_id}"
+    if [[ ! -f "${cuda_lib_overlay}/.base-ready" ]]; then
+        rm -rf "$cuda_lib_overlay"
+        mkdir -p "$cuda_lib_overlay"
+        cp -a "${container_lib_dir}/." "$cuda_lib_overlay/"
+        touch "${cuda_lib_overlay}/.base-ready"
+    fi
     for library in libnvidia-ptxjitcompiler.so.1 libnvidia-nvvm.so.4; do
         [[ -e "/usr/lib64/${library}" ]] || {
             echo "GPU requested, but host CUDA library /usr/lib64/${library} is missing" >&2
             exit 1
         }
-        link="${container_lib_dir}/${library}"
-        if [[ -L "$link" ]] && [[ "$(readlink "$link")" == "../../../opt/lido-nvidia/${library}" ]]; then
-            continue
-        fi
-        if [[ -e "$link" || -L "$link" ]]; then
-            echo "GPU requested, but sci-agent already has a conflicting ${library}" >&2
+        host_library="$(readlink -f "/usr/lib64/${library}")"
+        [[ -f "$host_library" ]] || {
+            echo "GPU requested, but host CUDA library /usr/lib64/${library} has no regular target" >&2
             exit 1
+        }
+        if ! cmp -s "$host_library" "${cuda_lib_overlay}/${library}"; then
+            cp "$host_library" "${cuda_lib_overlay}/${library}.tmp"
+            mv -f "${cuda_lib_overlay}/${library}.tmp" "${cuda_lib_overlay}/${library}"
         fi
-        ln -s "../../../opt/lido-nvidia/${library}" "$link"
     done
+    CONTAINER_ARGS+=("--volume=${cuda_lib_overlay}:/usr/lib/x86_64-linux-gnu")
 fi
 if [[ -n "$GPU_TYPE" ]]; then
     udocker run "${CONTAINER_ARGS[@]}" sci-agent bash -lc \
