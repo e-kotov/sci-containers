@@ -100,7 +100,22 @@ declare -a CONTAINER_ARGS=(
 )
 [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]] || CONTAINER_ARGS+=(--env="CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}")
 [[ -z "${NVIDIA_VISIBLE_DEVICES:-}" ]] || CONTAINER_ARGS+=(--env="NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES}")
-[[ -z "$GPU_TYPE" ]] || CONTAINER_ARGS+=(--env="LIDO_AGENT_GPU=${GPU_TYPE}")
+if [[ -n "$GPU_TYPE" ]]; then
+    CONTAINER_ARGS+=(--env="LIDO_AGENT_GPU=${GPU_TYPE}")
+    driver_lib_count=0
+    for driver_lib in \
+        /usr/lib64/libcuda.so* /lib64/libcuda.so* \
+        /usr/lib64/libnvidia-ptxjitcompiler.so* /lib64/libnvidia-ptxjitcompiler.so* \
+        /usr/lib64/libnvidia-nvvm.so* /lib64/libnvidia-nvvm.so* \
+        /usr/lib64/libnvidia-fatbinaryloader.so* /lib64/libnvidia-fatbinaryloader.so* \
+        /usr/lib64/libnvidia-ml.so* /lib64/libnvidia-ml.so*; do
+        [[ -f "$driver_lib" ]] || continue
+        CONTAINER_ARGS+=(--volume="${driver_lib}:/opt/lido-nvidia/${driver_lib##*/}:ro")
+        driver_lib_count=$((driver_lib_count + 1))
+    done
+    (( driver_lib_count > 0 )) || { echo 'GPU requested, but host CUDA driver libraries were not found' >&2; exit 1; }
+    CONTAINER_ARGS+=(--env='LD_LIBRARY_PATH=/opt/lido-nvidia')
+fi
 udocker run "${CONTAINER_ARGS[@]}" sci-agent bash -lc \
     'echo "ready: node $(node -v), $(claude --version 2>&1 | head -1)"'
 
