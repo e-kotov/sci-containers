@@ -108,6 +108,18 @@ if [[ -n "$GPU_TYPE" ]]; then
     }
     CONTAINER_ARGS+=(--volume=/usr/lib64:/opt/lido-nvidia)
     CONTAINER_ARGS+=(--env=LIDO_CUDA_HOST_LIBS=/opt/lido-nvidia)
+    # CUDA's PTX loader dlopens the JIT compiler by soname. Under udocker the
+    # dynamic loader searches the container's standard library directories,
+    # even when LD_LIBRARY_PATH points at this host mount. Expose only these
+    # two driver libraries in the container's existing multiarch directory;
+    # mounting the host's whole /usr/lib64 there would replace container libs.
+    for library in libnvidia-ptxjitcompiler.so.1 libnvidia-nvvm.so.4; do
+        [[ -e "/usr/lib64/${library}" ]] || {
+            echo "GPU requested, but host CUDA library /usr/lib64/${library} is missing" >&2
+            exit 1
+        }
+        CONTAINER_ARGS+=("--volume=/usr/lib64/${library}:/usr/lib/x86_64-linux-gnu/${library}")
+    done
 fi
 if [[ -n "$GPU_TYPE" ]]; then
     udocker run "${CONTAINER_ARGS[@]}" sci-agent bash -lc \
