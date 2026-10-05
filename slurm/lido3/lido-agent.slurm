@@ -108,22 +108,31 @@ if [[ -n "$GPU_TYPE" ]]; then
     }
     CONTAINER_ARGS+=(--volume=/usr/lib64:/opt/lido-nvidia)
     CONTAINER_ARGS+=(--env=LIDO_CUDA_HOST_LIBS=/opt/lido-nvidia)
-    # CUDA's PTX loader dlopens the JIT compiler by soname. Under udocker the
-    # dynamic loader searches the container's standard library directories,
-    # even when LD_LIBRARY_PATH points at this host mount. Expose only these
-    # two driver libraries in the container's existing multiarch directory;
-    # mounting the host's whole /usr/lib64 there would replace container libs.
+    # CUDA's PTX loader dlopens the JIT compiler by soname. Under udocker that
+    # lookup searches the container's standard library directories, even when
+    # LD_LIBRARY_PATH points at this host mount. Add container-root symlinks
+    # into the host-library mount so this lookup succeeds without overlaying
+    # any of the container's own libraries.
+    container_root="$(udocker inspect -p sci-agent)"
+    container_lib_dir="${container_root}/usr/lib/x86_64-linux-gnu"
+    [[ -d "$container_lib_dir" ]] || {
+        echo "GPU requested, but sci-agent lacks /usr/lib/x86_64-linux-gnu" >&2
+        exit 1
+    }
     for library in libnvidia-ptxjitcompiler.so.1 libnvidia-nvvm.so.4; do
         [[ -e "/usr/lib64/${library}" ]] || {
             echo "GPU requested, but host CUDA library /usr/lib64/${library} is missing" >&2
             exit 1
         }
-        host_library="$(readlink -f "/usr/lib64/${library}")"
-        [[ -f "$host_library" ]] || {
-            echo "GPU requested, but host CUDA library /usr/lib64/${library} has no regular target" >&2
+        link="${container_lib_dir}/${library}"
+        if [[ -L "$link" ]] && [[ "$(readlink "$link")" == "/opt/lido-nvidia/${library}" ]]; then
+            continue
+        fi
+        if [[ -e "$link" || -L "$link" ]]; then
+            echo "GPU requested, but sci-agent already has a conflicting ${library}" >&2
             exit 1
-        }
-        CONTAINER_ARGS+=("--volume=${host_library}:/usr/lib/x86_64-linux-gnu/${library}")
+        fi
+        ln -s "/opt/lido-nvidia/${library}" "$link"
     done
 fi
 if [[ -n "$GPU_TYPE" ]]; then
