@@ -125,14 +125,14 @@ if [[ -n "$GPU_TYPE" ]]; then
             exit 1
         }
         link="${container_lib_dir}/${library}"
-        if [[ -L "$link" ]] && [[ "$(readlink "$link")" == "/opt/lido-nvidia/${library}" ]]; then
+        if [[ -L "$link" ]] && [[ "$(readlink "$link")" == "../../../opt/lido-nvidia/${library}" ]]; then
             continue
         fi
         if [[ -e "$link" || -L "$link" ]]; then
             echo "GPU requested, but sci-agent already has a conflicting ${library}" >&2
             exit 1
         fi
-        ln -s "/opt/lido-nvidia/${library}" "$link"
+        ln -s "../../../opt/lido-nvidia/${library}" "$link"
     done
 fi
 if [[ -n "$GPU_TYPE" ]]; then
