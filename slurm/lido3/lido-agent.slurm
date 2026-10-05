@@ -128,7 +128,7 @@ if [[ -n "$GPU_TYPE" ]]; then
         cp -a "${container_lib_dir}/." "$cuda_lib_overlay/"
         touch "${cuda_lib_overlay}/.base-ready"
     fi
-    for library in libnvidia-ptxjitcompiler.so.1 libnvidia-nvvm.so.4; do
+    for library in libcuda.so.1 libnvidia-ptxjitcompiler.so.1 libnvidia-nvvm.so.4; do
         [[ -e "/usr/lib64/${library}" ]] || {
             echo "GPU requested, but host CUDA library /usr/lib64/${library} is missing" >&2
             exit 1
