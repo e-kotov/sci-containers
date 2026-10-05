@@ -108,6 +108,11 @@ if [[ -n "$GPU_TYPE" ]]; then
     }
     CONTAINER_ARGS+=(--volume=/usr/lib64:/opt/lido-nvidia)
     CONTAINER_ARGS+=(--env=LIDO_CUDA_HOST_LIBS=/opt/lido-nvidia)
+    [[ -f "${SCI_CONTAINERS_DIR}/slurm/lido3/python/sitecustomize.py" ]] || {
+        echo 'GPU requested, but the CUDA Python preload hook is missing' >&2
+        exit 1
+    }
+    CONTAINER_ARGS+=("--env=LIDO_CUDA_PYTHON_DIR=${SCI_CONTAINERS_DIR}/slurm/lido3/python")
     # CUDA's PTX loader dlopens the JIT compiler by soname. Under udocker that
     # lookup searches the container's standard library directories, even when
     # LD_LIBRARY_PATH points at this host mount. Build a merged copy of the
@@ -147,7 +152,7 @@ if [[ -n "$GPU_TYPE" ]]; then
 fi
 if [[ -n "$GPU_TYPE" ]]; then
     udocker run "${CONTAINER_ARGS[@]}" sci-agent bash -lc \
-        'export LD_LIBRARY_PATH="${LIDO_CUDA_HOST_LIBS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; python3 -c '\''import ctypes; d=ctypes.CDLL("/opt/lido-nvidia/libcuda.so.1"); assert d.cuInit(0)==0; print("ready: CUDA driver initialized")'\''; echo "ready: node $(node -v), $(claude --version 2>&1 | head -1)"'
+        'export LD_LIBRARY_PATH="${LIDO_CUDA_HOST_LIBS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; export PYTHONPATH="${LIDO_CUDA_PYTHON_DIR}${PYTHONPATH:+:$PYTHONPATH}"; python3 -c '\''import ctypes; d=ctypes.CDLL("/opt/lido-nvidia/libcuda.so.1"); assert d.cuInit(0)==0; print("ready: CUDA driver initialized")'\''; echo "ready: node $(node -v), $(claude --version 2>&1 | head -1)"'
 else
     udocker run "${CONTAINER_ARGS[@]}" sci-agent bash -lc \
         'echo "ready: node $(node -v), $(claude --version 2>&1 | head -1)"'
