@@ -106,12 +106,12 @@ if [[ -n "$GPU_TYPE" ]]; then
         echo 'GPU requested, but host CUDA driver libraries were not found in /usr/lib64' >&2
         exit 1
     }
-    CONTAINER_ARGS+=(--volume=/usr/lib64:/opt/lido-nvidia)
-    CONTAINER_ARGS+=(--env=LIDO_CUDA_HOST_LIBS=/opt/lido-nvidia)
+    CONTAINER_ARGS+=(--volume=/usr/lib64:/usr/lib64)
+    CONTAINER_ARGS+=(--env=LIDO_CUDA_HOST_LIBS=/usr/lib64)
 fi
 if [[ -n "$GPU_TYPE" ]]; then
     udocker run "${CONTAINER_ARGS[@]}" sci-agent bash -lc \
-        'export LD_LIBRARY_PATH="${LIDO_CUDA_HOST_LIBS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; python3 -c '\''import ctypes; d=ctypes.CDLL("libcuda.so.1"); assert d.cuInit(0)==0; print("ready: CUDA driver initialized")'\''; echo "ready: node $(node -v), $(claude --version 2>&1 | head -1)"'
+        'export LD_LIBRARY_PATH="${LIDO_CUDA_HOST_LIBS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; python3 -c '\''import ctypes; d=ctypes.CDLL("/usr/lib64/libcuda.so.1"); assert d.cuInit(0)==0; print("ready: CUDA driver initialized")'\''; echo "ready: node $(node -v), $(claude --version 2>&1 | head -1)"'
 else
     udocker run "${CONTAINER_ARGS[@]}" sci-agent bash -lc \
         'echo "ready: node $(node -v), $(claude --version 2>&1 | head -1)"'
